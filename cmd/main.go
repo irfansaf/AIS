@@ -1,13 +1,17 @@
 package main
 
 import (
+	"ais/internal/adapters/bitbucket"
 	"ais/internal/adapters/http"
 	"ais/internal/application"
-	"github.com/bytedance/sonic"
 	"log"
 	"os"
+	"time"
+
+	"github.com/bytedance/sonic"
 
 	"github.com/gofiber/fiber/v2"
+	_ "github.com/joho/godotenv/autoload"
 )
 
 func main() {
@@ -16,13 +20,41 @@ func main() {
 		log.Println("WARNING: BITBUCKET_WEBHOOK_SECRET environment variable not set. Signature validation will be skipped.")
 	}
 
-	appService := application.NewWebhookService()
+	// Initialize Bitbucket client configuration
+	bitbucketURL := os.Getenv("BITBUCKET_URL")
+	bitbucketUsername := os.Getenv("BITBUCKET_USERNAME")
+	bitbucketPassword := os.Getenv("BITBUCKET_PASSWORD")
+
+	if bitbucketURL == "" {
+		log.Fatal("BITBUCKET_URL environment variable is required")
+	}
+	if bitbucketUsername == "" {
+		log.Fatal("BITBUCKET_USERNAME environment variable is required")
+	}
+	if bitbucketPassword == "" {
+		log.Fatal("BITBUCKET_PASSWORD environment variable is required")
+	}
+
+	// Create Bitbucket client
+	bitbucketClient := bitbucket.NewClient(bitbucketURL, bitbucketUsername, bitbucketPassword)
+
+	// Create application service with dependencies
+	appService := application.NewWebhookService(bitbucketClient)
 
 	webhookHandler := http.NewWebhookHandler(appService, webhookSecret)
 
 	app := fiber.New(fiber.Config{
 		JSONEncoder: sonic.Marshal,
 		JSONDecoder: sonic.Unmarshal,
+	})
+
+	// Health check endpoint
+	app.Get("/health", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"status":    "healthy",
+			"service":   "bitbucket-assistant",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
 	})
 
 	api := app.Group("/api")

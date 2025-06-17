@@ -2,7 +2,9 @@ package application
 
 import (
 	"ais/internal/core/domain/webhook"
+	"ais/internal/core/ports"
 	"context"
+	"fmt"
 	"github.com/gofiber/fiber/v2/log"
 )
 
@@ -14,16 +16,15 @@ type WebhookService interface {
 
 // webhookService is the concrete implementation of the WebhookService interface.
 type webhookService struct {
-	// In a real application, you would inject dependencies like repositories here.
-	// For example:
-	// prRepo repositories.PullRequestRepository
-	// logger *log.Logger
+	bitbucketClient ports.BitbucketClient
 }
 
 // NewWebhookService is a factory function to create a new webhookService.
 // This is where you would inject its dependencies.
-func NewWebhookService() WebhookService {
-	return &webhookService{}
+func NewWebhookService(bitbucketClient ports.BitbucketClient) WebhookService {
+	return &webhookService{
+		bitbucketClient: bitbucketClient,
+	}
 }
 
 // ProcessPullRequestEvent contains the business logic for handling a PR event.
@@ -36,11 +37,12 @@ func (s *webhookService) ProcessPullRequestEvent(ctx context.Context, event webh
 	case "pr:opened":
 		log.Debugf("Pull Request #%d opened: '%s'", event.PullRequest.ID, event.PullRequest.Title)
 		log.Debugf("Source Branch: %s -> Target Branch: %s", event.PullRequest.FromRef.DisplayID, event.PullRequest.ToRef.DisplayID)
-		// TODO: Implement business logic for a newly opened PR.
-		// Examples:
-		// - Notify a Slack channel.
-		// - Trigger a CI/CD pipeline.
-		// - Add a default comment to the PR.
+		
+		// Add a welcome comment to the newly opened PR
+		if err := s.addWelcomeComment(ctx, event); err != nil {
+			log.Errorf("Failed to add welcome comment to PR #%d: %v", event.PullRequest.ID, err)
+			// Don't return error as this is not critical to the webhook processing
+		}
 
 	case "pr:from_ref_updated":
 		log.Debugf("Pull Request #%d source branch updated: '%s'", event.PullRequest.ID, event.PullRequest.Title)
@@ -61,5 +63,41 @@ func (s *webhookService) ProcessPullRequestEvent(ctx context.Context, event webh
 	//     return fmt.Errorf("failed to save pull request state: %w", err)
 	// }
 
+	return nil
+}
+
+// addWelcomeComment adds a welcome comment to a newly opened pull request
+func (s *webhookService) addWelcomeComment(ctx context.Context, event webhook.PullRequestEvent) error {
+	projectKey := event.PullRequest.ToRef.Repository.Project.Key
+	repoSlug := event.PullRequest.ToRef.Repository.Slug
+	pullRequestID := event.PullRequest.ID
+
+	// Create a personalized welcome message
+	commentText := fmt.Sprintf(
+		"🎉 **Welcome %s!**\n\n"+
+			"Thank you for opening this pull request. Here are some quick reminders:\n\n"+
+			"✅ **Code Review Checklist:**\n"+
+			"- [ ] Code follows project coding standards\n"+
+			"- [ ] Tests are included and passing\n"+
+			"- [ ] Documentation is updated if needed\n"+
+			"- [ ] No sensitive information is exposed\n\n"+
+			"📋 **PR Details:**\n"+
+			"- **Title:** %s\n"+
+			"- **Source Branch:** `%s`\n"+
+			"- **Target Branch:** `%s`\n\n"+
+			"A reviewer will be assigned shortly. Thank you for your contribution! 🚀",
+		event.PullRequest.Author.User.DisplayName,
+		event.PullRequest.Title,
+		event.PullRequest.FromRef.DisplayID,
+		event.PullRequest.ToRef.DisplayID,
+	)
+
+	// Use the Bitbucket client to add the comment
+	err := s.bitbucketClient.AddPullRequestComment(ctx, projectKey, repoSlug, pullRequestID, commentText)
+	if err != nil {
+		return fmt.Errorf("failed to add comment via Bitbucket API: %w", err)
+	}
+
+	log.Infof("Successfully added welcome comment to PR #%d in %s/%s", pullRequestID, projectKey, repoSlug)
 	return nil
 }
