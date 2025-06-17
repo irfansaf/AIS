@@ -11,6 +11,7 @@ import (
 	"github.com/bytedance/sonic"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/logger"
 	_ "github.com/joho/godotenv/autoload"
 )
 
@@ -47,6 +48,12 @@ func main() {
 		JSONEncoder: sonic.Marshal,
 		JSONDecoder: sonic.Unmarshal,
 	})
+
+	app.Use(logger.New(logger.Config{
+		Format:     "${time} ${status} - ${latency} ${method} ${path} - ${ua} - ${ip} - ${locals:requestid}\n",
+		TimeFormat: "02-Jan-2006 15:04:05",
+		TimeZone:   "Asia/Jakarta",
+	}))
 
 	// Health check endpoint
 	app.Get("/health", func(c *fiber.Ctx) error {
